@@ -23,7 +23,7 @@ pub fn by_exe(exe: &str) -> Option<Entry> {
         }
         "dwm.exe" => e("Desktop Window Manager", "Draws every window, animation and transparency effect.", "Busy with high refresh rates, several monitors or games in windowed mode.", true),
         "audiodg.exe" => e("Windows audio engine", "Mixes and processes all sound.", "Heavy use usually comes from audio enhancements or effects.", true),
-        "svchost.exe" => e("Windows services", "A host for several background Windows services.", "Culprit names the services inside, which matters more than the host.", true),
+        "svchost.exe" => e("Windows services", "A host for several background Windows services.", "Slowpoke names the services inside, which matters more than the host.", true),
         "explorer.exe" => e("File Explorer & taskbar", "The desktop, taskbar, Start menu and file windows.", "Busy while copying files or showing folders with many thumbnails.", false),
         "searchindexer.exe" | "searchprotocolhost.exe" | "searchfilterhost.exe" => {
             e("Windows Search indexing", "Reads your files so that Start-menu search can find them.", "Normal after many new files. If it never stops, exclude large data folders from indexing.", false)
@@ -72,7 +72,7 @@ pub fn by_exe(exe: &str) -> Option<Entry> {
         "epicgameslauncher.exe" => e("Epic Games Launcher", "Game store and launcher.", "Busy while downloading or updating games.", false),
         "obs64.exe" => e("OBS Studio", "Recording and streaming.", "Encoding video is heavy. A hardware encoder (NVENC/QuickSync) lowers CPU use.", false),
         "anydesk.exe" | "rustdesk.exe" | "teamviewer.exe" => e("Remote desktop", "Remote access tool.", "Busy while someone is connected.", false),
-        "culprit.exe" => e("Culprit", "This app.", "It should stay under 1 % CPU. If not, please report it.", true),
+        "slowpoke.exe" => e("Slowpoke", "This app.", "It should stay under 1 % CPU. If not, please report it.", true),
         _ => return None,
     })
 }
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn protects_critical_processes() {
-        for p in ["csrss.exe", "lsass.exe", "svchost.exe", "dwm.exe", "system", "msmpeng.exe", "culprit.exe"] {
+        for p in ["csrss.exe", "lsass.exe", "svchost.exe", "dwm.exe", "system", "msmpeng.exe", "slowpoke.exe"] {
             assert!(is_critical(p), "{p}");
         }
         assert!(!is_critical("chrome.exe"));

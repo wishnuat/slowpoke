@@ -32,7 +32,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .verdict h1 { margin: 8px 0 4px; font: 600 23px/1.3 "Segoe UI Variable Display", "Segoe UI", system-ui; }
 .verdict p { margin: 0; }
 
-.gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 14px 26px 0; }
+.gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 14px 26px 0; }
 .gauge { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 7px; }
 .gauge.hot { border-color: color-mix(in srgb, var(--busy) 60%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--busy) 25%, transparent); }
 .glabel { display: flex; justify-content: space-between; align-items: baseline; }
@@ -71,7 +71,7 @@ button.danger-ghost { border: 1px solid color-mix(in srgb, var(--strained) 50%, 
 button.danger { border: 0; background: var(--strained); color: #fff; border-radius: 8px; padding: 8px 16px; font-weight: 600; }
 @media (prefers-color-scheme: dark) { button.danger { color: #1b0a0a; } }
 
-.chart { width: 100%; height: 190px; display: block; }
+.chart { width: 100%; height: 170px; display: block; overflow: visible; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart path { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .ln-cpu { stroke: var(--cpu); } .ln-mem { stroke: var(--mem); opacity: .75; } .ln-disk { stroke: var(--disk); opacity: .8; }
@@ -105,3 +105,22 @@ button.danger { border: 0; background: var(--strained); color: #fff; border-radi
 .foot { align-items: center; }
 .overlaybtn { margin-left: 4px; white-space: nowrap; }
 
+
+/* Slowpoke: overall verdict, the internet card and the PC / Network tabs */
+.vtop { display: flex; align-items: center; gap: 8px; }
+.area { font-size: 11.5px; font-weight: 600; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; }
+.also { margin: 6px 0 0 !important; font-size: 13px; color: var(--text); opacity: .85; }
+.also::before { content: "→ "; color: var(--muted); }
+button.gauge { font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .2s; }
+button.gauge:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.glabel b.t-busy { color: var(--busy); } .glabel b.t-strained { color: var(--strained); }
+.hops { display: flex; gap: 4px; height: 8px; }
+.hop { flex: 1; border-radius: 4px; font-size: 0; background: var(--calm); }
+.hop.h-degraded { background: var(--busy); } .hop.h-down { background: var(--strained); }
+.tabs { display: flex; gap: 4px; padding: 12px 26px 0; border-bottom: 1px solid var(--line); }
+.tabs button { border: 0; background: none; padding: 7px 14px 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 7px; }
+.tabs button:hover { color: var(--text); }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.tdot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.tdot.d-busy { background: var(--busy); } .tdot.d-strained { background: var(--strained); animation: spin 0s; box-shadow: 0 0 0 3px color-mix(in srgb, var(--strained) 25%, transparent); }
+@media (max-width: 900px) { .gauges { grid-template-columns: repeat(2, 1fr); } }

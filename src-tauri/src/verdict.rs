@@ -145,7 +145,7 @@ pub fn judge(s: &Sample, services: &HashMap<u32, Vec<String>>, label: &dyn Fn(&s
             Resource::Memory => c.mem as f64,
         }
     };
-    let mut list: Vec<Culprit> = groups.into_values().filter(|c| c.exe != "culprit.exe" || level == Level::Calm).collect();
+    let mut list: Vec<Culprit> = groups.into_values().filter(|c| c.exe != "slowpoke.exe" || level == Level::Calm).collect();
     let total: f64 = list.iter().map(metric).sum::<f64>().max(1e-9);
     for c in &mut list {
         c.share = (metric(c) / total) as f32;

@@ -1,5 +1,7 @@
 pub mod catalog;
 pub mod history;
+pub mod net;
+pub mod overall;
 pub mod sampler;
 pub mod services;
 pub mod verdict;
@@ -8,13 +10,14 @@ pub mod winutil;
 use history::{History, Moment};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use overall::Overall;
 use verdict::{Level, Verdict};
 
 pub fn now_ms() -> u64 {
@@ -26,9 +29,9 @@ const INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Serialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SelfCost {
-    /// Culprit's own CPU (sampler + UI), % of the machine
+    /// Slowpoke's own CPU (sampler + UI), % of the machine
     pub cpu: f32,
-    /// private memory of Culprit and its WebView processes, bytes
+    /// private memory of Slowpoke and its WebView processes, bytes
     pub mem: u64,
     pub window_open: bool,
 }
@@ -37,6 +40,9 @@ pub struct SelfCost {
 #[serde(rename_all = "camelCase")]
 pub struct Now {
     pub verdict: Verdict,
+    /// latest network diagnosis (None until the first network check)
+    pub net: Option<net::verdict::Verdict>,
+    pub overall: Overall,
     pub cost: SelfCost,
 }
 
@@ -48,14 +54,13 @@ struct Shared {
     paths: Mutex<HashMap<String, String>>,
     level: AtomicU8,
     overlay: Mutex<OverlayPrefs>,
+    net: Mutex<Option<net::verdict::Verdict>>,
+    net_history: Mutex<net::history::History>,
+    speed_running: AtomicBool,
 }
 
 fn level_u8(l: Level) -> u8 {
-    match l {
-        Level::Calm => 0,
-        Level::Busy => 1,
-        Level::Strained => 2,
-    }
+    overall::rank(l)
 }
 
 /// 32×32 tray icon: a dot coloured by load.
@@ -104,11 +109,11 @@ fn open_window(app: &AppHandle) {
         let _ = w.set_focus();
         return;
     }
-    // created on demand and destroyed on close, so the WebView costs nothing while Culprit sits in the tray
+    // created on demand and destroyed on close, so the WebView costs nothing while Slowpoke sits in the tray
     let _ = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("Culprit")
-        .inner_size(1040.0, 720.0)
-        .min_inner_size(760.0, 520.0)
+        .title("Slowpoke")
+        .inner_size(1100.0, 800.0)
+        .min_inner_size(860.0, 600.0)
         .build();
 }
 
@@ -130,12 +135,12 @@ pub struct OverlayPrefs {
 
 impl Default for OverlayPrefs {
     fn default() -> Self {
-        Self { x: None, y: None, w: 272.0, h: 132.0, opacity: 0.78, click_through: false }
+        Self { x: None, y: None, w: 272.0, h: 166.0, opacity: 0.78, click_through: false }
     }
 }
 
 fn prefs_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("Culprit")).join("overlay.json")
+    app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("Slowpoke")).join("overlay.json")
 }
 
 fn save_prefs(app: &AppHandle) {
@@ -171,10 +176,10 @@ fn open_overlay(app: &AppHandle) {
     let Some(shared) = app.try_state::<Arc<Shared>>() else { return };
     let p = shared.overlay.lock().unwrap().clone();
     let Ok(w) = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#overlay".into()))
-        .title("Culprit overlay")
+        .title("Slowpoke overlay")
         .inner_size(p.w, p.h)
         .min_inner_size(200.0, 100.0)
-        .max_inner_size(560.0, 280.0)
+        .max_inner_size(560.0, 340.0)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
@@ -304,18 +309,21 @@ fn sampler_loop(app: AppHandle, shared: Arc<Shared>) {
             window_open: app.get_webview_window("main").is_some() || app.get_webview_window("overlay").is_some(),
         };
 
+        let netv = shared.net.lock().unwrap().clone();
+        let o = overall::combine(&v, netv.as_ref());
+
         // tray
-        let lv = level_u8(v.level);
+        let lv = level_u8(o.level);
         if let Some(tray) = app.tray_by_id("tray") {
             if shared.level.swap(lv, Ordering::Relaxed) != lv || n == 0 {
                 let _ = tray.set_icon(Some(tray_icon(lv)));
             }
-            let tip: String = format!("Culprit · {}", v.headline).chars().take(120).collect();
+            let tip: String = format!("Slowpoke · {}", o.headline).chars().take(120).collect();
             let _ = tray.set_tooltip(Some(tip));
         }
 
         if cost.window_open {
-            let payload = Now { verdict: v.clone(), cost: cost.clone() };
+            let payload = Now { verdict: v.clone(), net: netv.clone(), overall: o.clone(), cost: cost.clone() };
             for label in ["main", "overlay"] {
                 if app.get_webview_window(label).is_some() {
                     let _ = app.emit_to(label, "now", payload.clone());
@@ -336,12 +344,35 @@ fn sampler_loop(app: AppHandle, shared: Arc<Shared>) {
     }
 }
 
+/// The network checks run on their own thread: a ping can wait for its timeout, and that must never delay
+/// the PC sampler. Every 3 s: probe each hop, judge, record.
+fn net_loop(shared: Arc<Shared>) {
+    let mut mon = net::monitor::Monitor::new();
+    let mut n: u64 = 0;
+    loop {
+        let t0 = Instant::now();
+        let v = net::verdict::judge(&mon.tick());
+        {
+            let mut h = shared.net_history.lock().unwrap();
+            h.push(net::history::Rec::from(&v));
+            if n % 20 == 0 {
+                h.flush();
+            }
+        }
+        *shared.net.lock().unwrap() = Some(v);
+        n += 1;
+        std::thread::sleep(net::monitor::TICK.saturating_sub(t0.elapsed()));
+    }
+}
+
 // ---------------------------------------------------------------- commands
 
 #[tauri::command]
 fn get_now(state: tauri::State<'_, Arc<Shared>>) -> Option<Now> {
     let v = state.latest.lock().unwrap().clone()?;
-    Some(Now { verdict: v, cost: state.cost.lock().unwrap().clone() })
+    let net = state.net.lock().unwrap().clone();
+    let overall = overall::combine(&v, net.as_ref());
+    Some(Now { verdict: v, net, overall, cost: state.cost.lock().unwrap().clone() })
 }
 
 #[derive(Serialize)]
@@ -426,10 +457,94 @@ fn search_web(query: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NetTimeline {
+    /// [t, health, routerMs, internetMs, internetLoss, dnsMs, signal, rx (tenths of Mbps)]; 65535/255 = none
+    points: Vec<[u32; 8]>,
+    moments: Vec<net::history::Moment>,
+    from: u32,
+    to: u32,
+}
+
+#[tauri::command]
+fn get_net_timeline(hours: u32, state: tauri::State<'_, Arc<Shared>>) -> NetTimeline {
+    let to = (now_ms() / 1000) as u32;
+    let from = to.saturating_sub(hours.clamp(1, 168) * 3600);
+    let h = state.net_history.lock().unwrap();
+    let bucket = ((to - from) / 720).max(3);
+    let mut points: Vec<[u32; 8]> = Vec::new();
+    for r in h.range(from) {
+        let b = r.t - r.t % bucket;
+        let p = [b, r.health as u32, r.router_ms as u32, r.inet_ms as u32, r.inet_loss as u32, r.dns_ms as u32, r.signal as u32, r.rx as u32];
+        match points.last_mut() {
+            // keep the worst value per bucket so problems stay visible
+            Some(last) if last[0] == b => {
+                last[1] = last[1].max(p[1]);
+                for i in [2, 3, 5] {
+                    last[i] = if last[i] == 65535 { p[i] } else if p[i] == 65535 { last[i] } else { last[i].max(p[i]) };
+                }
+                last[4] = last[4].max(p[4]);
+                last[6] = if last[6] == 255 { p[6] } else if p[6] == 255 { last[6] } else { last[6].min(p[6]) };
+                last[7] = last[7].max(p[7]);
+            }
+            _ => points.push(p),
+        }
+    }
+    NetTimeline { points, moments: h.moments(from, 15), from, to }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpeedResult {
+    mbps: f64,
+    bytes: u64,
+    seconds: f64,
+    server: String,
+}
+
+/// Manual download test: ~25 MB from Cloudflare's speed endpoint (stops early after 12 s).
+#[tauri::command]
+async fn speed_test(state: tauri::State<'_, Arc<Shared>>) -> Result<SpeedResult, String> {
+    if state.speed_running.swap(true, Ordering::SeqCst) {
+        return Err("A speed test is already running.".into());
+    }
+    let res = tauri::async_runtime::spawn_blocking(|| -> Result<SpeedResult, String> {
+        use std::io::Read;
+        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout_read(Duration::from_secs(10)).build();
+        // warm-up connection (TLS handshake) so it doesn't count against the measurement
+        let _ = agent.get("https://speed.cloudflare.com/__down?bytes=1000").call();
+        let resp = agent.get("https://speed.cloudflare.com/__down?bytes=25000000").call().map_err(|e| format!("Couldn't reach the speed-test server: {e}"))?;
+        let mut reader = resp.into_reader();
+        let mut buf = vec![0u8; 64 * 1024];
+        let t0 = Instant::now();
+        let mut total = 0u64;
+        loop {
+            let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+            total += n as u64;
+            if n == 0 || t0.elapsed().as_secs_f64() > 12.0 {
+                break;
+            }
+        }
+        let secs = t0.elapsed().as_secs_f64().max(0.001);
+        Ok(SpeedResult { mbps: total as f64 * 8.0 / secs / 1e6, bytes: total, seconds: secs, server: "speed.cloudflare.com".into() })
+    })
+    .await;
+    // always release the flag, even if the worker panicked
+    state.speed_running.store(false, Ordering::SeqCst);
+    res.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn open_network_settings() {
+    let _ = tauri_plugin_opener::open_url("ms-settings:network-status", None::<&str>);
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     if let Some(s) = app.try_state::<Arc<Shared>>() {
         s.history.lock().unwrap().flush();
+        s.net_history.lock().unwrap().flush();
     }
     save_prefs(&app);
     app.exit(0);
@@ -467,7 +582,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| open_window(app)))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("Culprit"));
+            let dir = app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("Slowpoke"));
             let shared = Arc::new(Shared {
                 latest: Mutex::new(None),
                 cost: Mutex::new(SelfCost::default()),
@@ -477,24 +592,29 @@ pub fn run() {
                 overlay: Mutex::new(
                     std::fs::read(dir.join("overlay.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
                 ),
+                net: Mutex::new(None),
+                net_history: Mutex::new(net::history::History::open(&dir.join("net-history"))),
+                speed_running: AtomicBool::new(false),
             });
             app.manage(shared.clone());
 
             let click_through_on = shared.overlay.lock().unwrap().click_through;
-            let open_i = MenuItem::with_id(app, "open", "Open Culprit", true, None::<&str>)?;
+            let open_i = MenuItem::with_id(app, "open", "Open Slowpoke", true, None::<&str>)?;
             let overlay_i = MenuItem::with_id(app, "overlay", "Show / hide mini overlay", true, None::<&str>)?;
             let ct_i = MenuItem::with_id(app, "click-through-off", "Overlay: turn click-through off", click_through_on, None::<&str>)?;
+            let net_i = MenuItem::with_id(app, "net", "Windows network settings", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             app.manage(ct_i.clone());
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon(0))
-                .tooltip("Culprit")
-                .menu(&Menu::with_items(app, &[&open_i, &overlay_i, &ct_i, &PredefinedMenuItem::separator(app)?, &quit_i])?)
+                .tooltip("Slowpoke")
+                .menu(&Menu::with_items(app, &[&open_i, &overlay_i, &ct_i, &net_i, &PredefinedMenuItem::separator(app)?, &quit_i])?)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => open_window(app),
                     "overlay" => toggle_overlay_inner(app),
                     "click-through-off" => set_click_through_inner(app, false),
+                    "net" => open_network_settings(),
                     "quit" => quit(app.clone()),
                     _ => {}
                 })
@@ -506,7 +626,9 @@ pub fn run() {
                 .build(app)?;
 
             let h = app.handle().clone();
+            let ns = shared.clone();
             std::thread::Builder::new().name("sampler".into()).spawn(move || sampler_loop(h, shared))?;
+            std::thread::Builder::new().name("network".into()).spawn(move || net_loop(ns))?;
             let args: Vec<String> = std::env::args().collect();
             if args.iter().any(|a| a == "--overlay") {
                 open_overlay(app.handle()); // start straight into the mini overlay
@@ -517,12 +639,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_now, get_timeline, get_icon, end_task, open_location, search_web, quit,
-            toggle_overlay, open_main, get_overlay_prefs, set_overlay_opacity, set_click_through
+            toggle_overlay, open_main, get_overlay_prefs, set_overlay_opacity, set_click_through,
+            get_net_timeline, speed_test, open_network_settings
         ])
         .build(tauri::generate_context!())
-        .expect("error while building Culprit")
+        .expect("error while building Slowpoke")
         .run(|_app, e| {
-            // closing the window destroys it (freeing the WebView) but Culprit keeps running in the tray
+            // closing the window destroys it (freeing the WebView) but Slowpoke keeps running in the tray
             if let tauri::RunEvent::ExitRequested { api, code: None, .. } = e {
                 api.prevent_exit();
             }

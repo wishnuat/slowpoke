@@ -24,7 +24,7 @@ jobs:
         run: npx tsc --noEmit
       - name: Build frontend (embedded by the Rust crate)
         run: npm run build
-      - name: Engine tests (sampler, services, catalog, verdict, history)
+      - name: Engine tests (PC sampler, verdicts, network probes, history, overall)
         working-directory: src-tauri
         run: cargo test --locked
 
@@ -51,6 +51,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Culprit ${{ github.ref_name }}
+          releaseName: Slowpoke ${{ github.ref_name }}
           releaseBody: See the README for what's new. The installer is not code-signed yet, so Windows SmartScreen may warn on first run.
           releaseDraft: true

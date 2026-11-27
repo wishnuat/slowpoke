@@ -28,3 +28,4 @@ preview/*.txt
 preview/*.err
 preview/*.log
 
+demo-video/out/

@@ -69,3 +69,13 @@ sampler thread (Rust, 2 s)                 history (ring file)        verdict
 3. History ring file + slow-moment detection
 4. Tray + UI (now, timeline, moment details)
 5. README, demo video, release
+
+## 0.3: Slowpoke (Culprit + Netdoctor)
+
+Users can't tell whether "slow" means the PC or the connection, so the two apps merged into one tray app.
+- The network half (probes, verdict, history) moved in unchanged as `src-tauri/src/net/`, on its own thread
+- `overall.rs` weighs the two verdicts on one scale (no internet > struggling PC > degraded network > busy PC) and
+  always says the other side is fine when it is
+- UI: one verdict header, four summary cards (processor, memory, disk, internet), and "This PC" / "Network" tabs
+  that follow the problem. The overlay gains a NET row (internet latency)
+- Budget check after the merge: 0.13 % CPU and 8.7 MB in the tray (was 0.12 % + 0.01 % as two apps)

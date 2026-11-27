@@ -1,0 +1,68 @@
+/* Network tab. Shares the app's tokens: good = --calm, degraded = --busy, down = --strained. */
+:root { --inet: #2563eb; --router: #0d9488; --loss: rgba(220, 38, 38, .55); }
+@media (prefers-color-scheme: dark) { :root { --inet: #60a5fa; --router: #2dd4bf; --loss: rgba(248, 113, 113, .6); } }
+
+.netview { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* path diagram */
+.path { display: flex; align-items: stretch; padding: 12px 26px 0; overflow-x: auto; }
+.node { position: relative; flex: 1 1 0; min-width: 116px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 10px 8px; display: grid; justify-items: center; gap: 2px; text-align: center; }
+.nicon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--nc) 13%, transparent); color: var(--nc); }
+.nicon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.n-good { --nc: var(--calm); } .n-degraded { --nc: var(--busy); } .n-down { --nc: var(--strained); }
+.nlabel { font-weight: 600; font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nvalue { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node.culprit-hop { border-color: var(--nc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--nc) 22%, transparent); animation: hop-pulse 2s ease-in-out infinite; }
+@keyframes hop-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--nc) 12%, transparent); } }
+.ntag { position: absolute; top: -9px; right: 10px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 999px; background: var(--nc); color: #fff; }
+@media (prefers-color-scheme: dark) { .ntag { color: #111; } }
+.wire { flex: 0 0 30px; display: grid; align-items: center; }
+.wire span { display: block; height: 3px; border-radius: 2px; background: var(--wc); position: relative; overflow: hidden; }
+.wire span::after { content: ""; position: absolute; inset: 0; width: 40%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.75), transparent); animation: flow 1.6s linear infinite; }
+.w-good { --wc: var(--calm); } .w-degraded { --wc: var(--busy); } .w-down { --wc: var(--strained); }
+.w-down span::after { display: none; }
+.w-down span { background: repeating-linear-gradient(90deg, var(--strained) 0 6px, transparent 6px 10px); }
+@keyframes flow { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* tiles */
+.tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 10px 26px 0; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; display: grid; gap: 1px; min-width: 0; }
+.tile.bad { border-color: color-mix(in srgb, var(--busy) 60%, var(--line)); }
+.ttitle { font-size: 12px; color: var(--muted); }
+.tvalue { font: 600 19px "Segoe UI Variable Display", "Segoe UI", system-ui; font-variant-numeric: tabular-nums; }
+.tile .spark { width: 100%; height: 22px; }
+.tile .spark path { fill: none; stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.tile.bad .spark path { stroke: var(--busy); }
+.tsub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* lower */
+.net-cols { grid-template-columns: 1.7fr 1fr; }
+.chart.netchart { height: 110px; overflow: visible; }
+.ln-inet { stroke: var(--inet); } .ln-router { stroke: var(--router); opacity: .85; }
+.lossbar { fill: var(--loss); }
+.band.b-degraded { fill: color-mix(in srgb, var(--busy) 16%, transparent); }
+.band.b-down { fill: color-mix(in srgb, var(--strained) 20%, transparent); }
+.l-inet::before { background: var(--inet); } .l-router::before { background: var(--router); } .l-loss::before { background: var(--loss); height: 8px !important; }
+.l-bad::before { background: color-mix(in srgb, var(--busy) 35%, transparent); height: 9px !important; }
+.netview .moments li { grid-template-columns: auto auto 1fr auto; cursor: default; }
+.sev { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.s-degraded { color: var(--busy); background: color-mix(in srgb, var(--busy) 14%, transparent); }
+.s-down { color: var(--strained); background: color-mix(in srgb, var(--strained) 14%, transparent); }
+.what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.speed { display: flex; flex-direction: column; gap: 10px; }
+.speed p { margin: 0; line-height: 1.5; }
+.speedres { padding: 10px 12px; border-radius: 10px; background: var(--hover); display: grid; gap: 4px; }
+.speedres .big { font: 700 36px "Segoe UI Variable Display", "Segoe UI", system-ui; line-height: 1; }
+.speedres .big span { font-size: 15px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+button.primary { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 600; align-self: flex-start; }
+@media (prefers-color-scheme: dark) { button.primary { color: #00131f; } }
+button.primary:disabled { opacity: .6; cursor: default; }
+.mini { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: spin .8s linear infinite; vertical-align: -1px; margin-right: 6px; }
+.err { color: var(--strained); }
+.netinfo { margin-top: auto; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 4px; }
+.netinfo > div { display: flex; justify-content: space-between; gap: 10px; }
+.netinfo b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 12.5px; justify-self: start; }
+button.link:hover { text-decoration: underline; }
+@media (max-width: 900px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
