@@ -88,6 +88,7 @@ export default function App() {
       <footer className="foot">
         <span>Culprit itself: <b>{now.cost.cpu.toFixed(1)} % CPU</b> · {fmtBytes(now.cost.mem)}{now.cost.windowOpen ? " (with this window open; it drops when you close it)" : ""}</span>
         <span className="muted">Updates every 2 s · history kept 7 days, on this PC only</span>
+        <button className="ghost overlaybtn" onClick={() => invoke("toggle_overlay")} title="A tiny always-on-top graph of CPU, memory and disk">▦ Mini overlay</button>
       </footer>
 
       {confirm && (

@@ -23,6 +23,13 @@ see that it was a Defender scan plus Windows Update.
 - **History and slow moments.** A 7-day timeline of processor, memory and disk. Sustained slowdowns are detected,
   marked and summarised with their causes
 - **Tray indicator.** The icon turns green, amber or red with the load, and the tooltip shows the verdict
+- **Mini overlay** (new in 0.2): a tiny always-on-top glass HUD with live sparklines and percentages for CPU, memory
+  and disk over the last minute. Colours shift calm → busy → strained, and a side bar glows with the verdict.
+  Drag it anywhere (its position is remembered), cycle the background opacity, double-click it to open the full
+  window, or make it **click-through** so it never gets in the way (turn that off from the tray menu). Toggle it
+  from the tray menu or the "Mini overlay" button
+
+  ![Mini overlay on a dark and a light wallpaper](docs/overlay.gif)
 - **End task**, with a confirmation that spells out the consequences. It's disabled for Windows-critical
   processes and services
 
@@ -40,8 +47,10 @@ How:
 - **Native sampling in Rust** with the same counters Windows uses: `GetSystemTimes`, `GlobalMemoryStatusEx`, PDH
   `% Idle Time`, and per process `GetProcessTimes` / `GetProcessIoCounters` / `K32GetProcessMemoryInfo`. Process
   handles are cached between samples
-- **The window is created on demand and destroyed on close**, so the WebView2 engine (≈ 90 MB) only exists while
-  you're looking. The footer shows Culprit's own cost live
+- **Windows are created on demand and destroyed on close** (main window and overlay alike), so the WebView2 engine
+  only exists while you're looking. The footer shows Culprit's own cost live, including its WebView processes
+- **The overlay keeps its own one-minute ring buffer** from the existing 2 s updates and draws plain SVG
+  sparklines, with no chart library and no extra sampling
 - **History is 29 bytes per sample** (load and the top three per resource, by name id), in one file per day
 
 ## Architecture

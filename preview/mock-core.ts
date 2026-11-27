@@ -44,5 +44,6 @@ function timeline(hours: number) {
 export async function invoke(cmd: string, args?: any): Promise<any> {
   if (cmd === "get_now") return NOW;
   if (cmd === "get_timeline") return timeline(args.hours);
+  if (cmd === "get_overlay_prefs") return { opacity: 0.78, clickThrough: false };
   return null;
 }

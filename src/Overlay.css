@@ -1,0 +1,42 @@
+/* Mini overlay: dark glass HUD. The window itself is transparent with Acrylic behind it; --a tints it. */
+html[data-view="overlay"], html[data-view="overlay"] body, html[data-view="overlay"] #root {
+  background: transparent !important; margin: 0; height: 100%; overflow: hidden; user-select: none; -webkit-user-select: none;
+}
+.ov {
+  --calm: #4ade80; --busy: #fbbf24; --strained: #f87171;
+  position: relative; box-sizing: border-box; height: 100vh; padding: 10px 12px 8px 14px;
+  display: flex; flex-direction: column; justify-content: space-around; gap: 2px;
+  border-radius: 12px; color: #f3f4f6; cursor: grab;
+  background: linear-gradient(145deg, rgba(20, 24, 33, var(--a)), rgba(10, 12, 18, calc(var(--a) + 0.06)));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.6s;
+}
+.ov:active { cursor: grabbing; }
+.ov.lvl-busy { border-color: color-mix(in srgb, var(--busy) 55%, transparent); }
+.ov.lvl-strained { border-color: color-mix(in srgb, var(--strained) 70%, transparent); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 18px -4px var(--strained); }
+
+.dot { position: absolute; left: 6px; top: 50%; width: 3px; height: 60%; transform: translateY(-50%); border-radius: 2px; background: var(--calm); box-shadow: 0 0 8px var(--calm); transition: background .6s, box-shadow .6s; }
+.lvl-busy .dot { background: var(--busy); box-shadow: 0 0 8px var(--busy); }
+.lvl-strained .dot { background: var(--strained); box-shadow: 0 0 10px var(--strained); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+.row { display: grid; grid-template-columns: 34px 1fr 54px; align-items: center; gap: 8px; min-height: 0; flex: 1; }
+.lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; color: rgba(243, 244, 246, 0.62); }
+.spark { width: 100%; height: 100%; max-height: 30px; overflow: visible; }
+.spark .ln { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.val { justify-self: end; font: 650 21px/1 "Segoe UI Variable Display", "Segoe UI", system-ui; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.val small { font-size: 11px; font-weight: 600; margin-left: 1px; opacity: 0.7; }
+
+.spark .ln { filter: drop-shadow(0 0 3px rgba(74, 222, 128, .55)); }
+.t-calm .val { color: #ecfdf5; }
+.t-busy .ln { filter: drop-shadow(0 0 3px rgba(251, 191, 36, .6)); } .t-busy .val { color: var(--busy); }
+.t-strained .ln { filter: drop-shadow(0 0 4px rgba(248, 113, 113, .7)); } .t-strained .val { color: var(--strained); }
+
+.ovtools { position: absolute; top: 5px; left: 50%; display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(0, 0, 0, 0.55); box-shadow: 0 4px 14px rgba(0,0,0,.35); opacity: 0; transform: translate(-50%, -3px); transition: opacity .15s, transform .15s; z-index: 2; }
+.ov:hover .ovtools { opacity: 1; transform: translate(-50%, 0); }
+.ovtools button { width: 20px; height: 20px; border: 0; border-radius: 5px; background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
+.ovtools button:hover { background: rgba(255, 255, 255, 0.26); }
+.ovtools button.x:hover { background: #ef4444; }

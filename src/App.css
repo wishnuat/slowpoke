@@ -101,3 +101,7 @@ button.danger { border: 0; background: var(--strained); color: #fff; border-radi
 .btns .ghost { padding: 8px 14px; font-size: 14px; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 8px; font-size: 13px; z-index: 20; }
 @media (max-width: 860px) { .cols { grid-template-columns: 1fr; overflow-y: auto; } }
+
+.foot { align-items: center; }
+.overlaybtn { margin-left: 4px; white-space: nowrap; }
+

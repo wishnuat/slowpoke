@@ -679,16 +679,18 @@ dependencies = [
 
 [[package]]
 name = "culprit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "png",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "window-vibrancy",
  "windows",
 ]
 

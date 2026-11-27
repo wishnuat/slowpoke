@@ -6,13 +6,13 @@ pub mod verdict;
 pub mod winutil;
 
 use history::{History, Moment};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use verdict::{Level, Verdict};
@@ -47,6 +47,7 @@ struct Shared {
     /// exe → path of one running instance (for icons / open location)
     paths: Mutex<HashMap<String, String>>,
     level: AtomicU8,
+    overlay: Mutex<OverlayPrefs>,
 }
 
 fn level_u8(l: Level) -> u8 {
@@ -111,6 +112,150 @@ fn open_window(app: &AppHandle) {
         .build();
 }
 
+// ---------------------------------------------------------------- mini overlay
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OverlayPrefs {
+    /// physical position of the top-left corner
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    /// logical size
+    pub w: f64,
+    pub h: f64,
+    /// background tint opacity, 0.3..1
+    pub opacity: f64,
+    pub click_through: bool,
+}
+
+impl Default for OverlayPrefs {
+    fn default() -> Self {
+        Self { x: None, y: None, w: 272.0, h: 132.0, opacity: 0.78, click_through: false }
+    }
+}
+
+fn prefs_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path().app_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("Culprit")).join("overlay.json")
+}
+
+fn save_prefs(app: &AppHandle) {
+    if let Some(s) = app.try_state::<Arc<Shared>>() {
+        let p = s.overlay.lock().unwrap().clone();
+        let path = prefs_path(app);
+        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        let _ = std::fs::write(path, serde_json::to_vec_pretty(&p).unwrap_or_default());
+    }
+}
+
+/// Glass look: Acrylic blur behind the window plus Windows 11 rounded corners.
+fn glass(w: &tauri::WebviewWindow) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
+    let _ = window_vibrancy::apply_acrylic(w, Some((12, 14, 20, 90)));
+    if let Ok(h) = w.window_handle() {
+        if let RawWindowHandle::Win32(h) = h.as_raw() {
+            let pref = DWMWCP_ROUND;
+            unsafe {
+                let _ = DwmSetWindowAttribute(HWND(h.hwnd.get() as *mut core::ffi::c_void), DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const _ as *const core::ffi::c_void, std::mem::size_of_val(&pref) as u32);
+            }
+        }
+    }
+}
+
+fn open_overlay(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.show();
+        return;
+    }
+    let Some(shared) = app.try_state::<Arc<Shared>>() else { return };
+    let p = shared.overlay.lock().unwrap().clone();
+    let Ok(w) = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html#overlay".into()))
+        .title("Culprit overlay")
+        .inner_size(p.w, p.h)
+        .min_inner_size(200.0, 100.0)
+        .max_inner_size(560.0, 280.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(true)
+        .focused(false)
+        .visible(false)
+        .build()
+    else {
+        return;
+    };
+    // restore the last position if it's still on a screen, else top-right of the primary work area
+    let on_screen = |x: i32, y: i32| w.available_monitors().map(|ms| ms.iter().any(|m| {
+        let (mp, ms) = (m.position(), m.size());
+        x >= mp.x - 40 && y >= mp.y - 10 && x < mp.x + ms.width as i32 - 40 && y < mp.y + ms.height as i32 - 40
+    })).unwrap_or(false);
+    match (p.x, p.y) {
+        (Some(x), Some(y)) if on_screen(x, y) => {
+            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+        _ => {
+            if let (Ok(Some(m)), Ok(size)) = (w.primary_monitor(), w.outer_size()) {
+                let wa = m.work_area();
+                let margin = (20.0 * m.scale_factor()) as i32;
+                let _ = w.set_position(tauri::PhysicalPosition::new(wa.position.x + wa.size.width as i32 - size.width as i32 - margin, wa.position.y + margin));
+            }
+        }
+    }
+    glass(&w);
+    if p.click_through {
+        let _ = w.set_ignore_cursor_events(true);
+    }
+    let h = app.clone();
+    w.on_window_event(move |e| {
+        let Some(s) = h.try_state::<Arc<Shared>>() else { return };
+        match e {
+            tauri::WindowEvent::Moved(pos) => {
+                let mut p = s.overlay.lock().unwrap();
+                p.x = Some(pos.x);
+                p.y = Some(pos.y);
+            }
+            tauri::WindowEvent::Resized(size) => {
+                if let Some(win) = h.get_webview_window("overlay") {
+                    let f = win.scale_factor().unwrap_or(1.0);
+                    let mut p = s.overlay.lock().unwrap();
+                    p.w = (size.width as f64 / f).round();
+                    p.h = (size.height as f64 / f).round();
+                }
+            }
+            tauri::WindowEvent::Destroyed => save_prefs(&h),
+            _ => {}
+        }
+    });
+    let _ = w.show();
+}
+
+fn toggle_overlay_inner(app: &AppHandle) {
+    match app.get_webview_window("overlay") {
+        Some(w) => {
+            save_prefs(app);
+            let _ = w.destroy(); // frees its WebView
+        }
+        None => open_overlay(app),
+    }
+}
+
+fn set_click_through_inner(app: &AppHandle, on: bool) {
+    if let Some(s) = app.try_state::<Arc<Shared>>() {
+        s.overlay.lock().unwrap().click_through = on;
+    }
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.set_ignore_cursor_events(on);
+        let _ = app.emit_to("overlay", "overlay-prefs", app.state::<Arc<Shared>>().overlay.lock().unwrap().clone());
+    }
+    if let Some(item) = app.try_state::<MenuItem<tauri::Wry>>() {
+        let _ = item.set_enabled(on);
+    }
+    save_prefs(app);
+}
+
 fn sampler_loop(app: AppHandle, shared: Arc<Shared>) {
     let mut s = sampler::Sampler::new();
     let mut svc = services::services_by_pid();
@@ -156,7 +301,7 @@ fn sampler_loop(app: AppHandle, shared: Arc<Shared>) {
         let cost = SelfCost {
             cpu: mine.iter().map(|p| p.cpu).sum(),
             mem: mine.iter().map(|p| p.mem).sum(),
-            window_open: app.get_webview_window("main").is_some(),
+            window_open: app.get_webview_window("main").is_some() || app.get_webview_window("overlay").is_some(),
         };
 
         // tray
@@ -170,7 +315,12 @@ fn sampler_loop(app: AppHandle, shared: Arc<Shared>) {
         }
 
         if cost.window_open {
-            let _ = app.emit_to("main", "now", Now { verdict: v.clone(), cost: cost.clone() });
+            let payload = Now { verdict: v.clone(), cost: cost.clone() };
+            for label in ["main", "overlay"] {
+                if app.get_webview_window(label).is_some() {
+                    let _ = app.emit_to(label, "now", payload.clone());
+                }
+            }
         }
         {
             let mut h = shared.history.lock().unwrap();
@@ -281,7 +431,34 @@ fn quit(app: AppHandle) {
     if let Some(s) = app.try_state::<Arc<Shared>>() {
         s.history.lock().unwrap().flush();
     }
+    save_prefs(&app);
     app.exit(0);
+}
+
+#[tauri::command]
+fn toggle_overlay(app: AppHandle) {
+    toggle_overlay_inner(&app);
+}
+
+#[tauri::command]
+fn open_main(app: AppHandle) {
+    open_window(&app);
+}
+
+#[tauri::command]
+fn get_overlay_prefs(state: tauri::State<'_, Arc<Shared>>) -> OverlayPrefs {
+    state.overlay.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn set_overlay_opacity(app: AppHandle, opacity: f64, state: tauri::State<'_, Arc<Shared>>) {
+    state.overlay.lock().unwrap().opacity = opacity.clamp(0.3, 1.0);
+    save_prefs(&app);
+}
+
+#[tauri::command]
+fn set_click_through(app: AppHandle, on: bool) {
+    set_click_through_inner(&app, on);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -297,18 +474,27 @@ pub fn run() {
                 history: Mutex::new(History::open(&dir.join("history"))),
                 paths: Mutex::new(HashMap::new()),
                 level: AtomicU8::new(0),
+                overlay: Mutex::new(
+                    std::fs::read(dir.join("overlay.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
+                ),
             });
             app.manage(shared.clone());
 
+            let click_through_on = shared.overlay.lock().unwrap().click_through;
             let open_i = MenuItem::with_id(app, "open", "Open Culprit", true, None::<&str>)?;
+            let overlay_i = MenuItem::with_id(app, "overlay", "Show / hide mini overlay", true, None::<&str>)?;
+            let ct_i = MenuItem::with_id(app, "click-through-off", "Overlay: turn click-through off", click_through_on, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            app.manage(ct_i.clone());
             TrayIconBuilder::with_id("tray")
                 .icon(tray_icon(0))
                 .tooltip("Culprit")
-                .menu(&Menu::with_items(app, &[&open_i, &quit_i])?)
+                .menu(&Menu::with_items(app, &[&open_i, &overlay_i, &ct_i, &PredefinedMenuItem::separator(app)?, &quit_i])?)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => open_window(app),
+                    "overlay" => toggle_overlay_inner(app),
+                    "click-through-off" => set_click_through_inner(app, false),
                     "quit" => quit(app.clone()),
                     _ => {}
                 })
@@ -321,12 +507,18 @@ pub fn run() {
 
             let h = app.handle().clone();
             std::thread::Builder::new().name("sampler".into()).spawn(move || sampler_loop(h, shared))?;
-            if !std::env::args().any(|a| a == "--minimized") {
+            let args: Vec<String> = std::env::args().collect();
+            if args.iter().any(|a| a == "--overlay") {
+                open_overlay(app.handle()); // start straight into the mini overlay
+            } else if !args.iter().any(|a| a == "--minimized") {
                 open_window(app.handle());
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_now, get_timeline, get_icon, end_task, open_location, search_web, quit])
+        .invoke_handler(tauri::generate_handler![
+            get_now, get_timeline, get_icon, end_task, open_location, search_web, quit,
+            toggle_overlay, open_main, get_overlay_prefs, set_overlay_opacity, set_click_through
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Culprit")
         .run(|_app, e| {
